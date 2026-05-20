@@ -25,7 +25,7 @@ enum InputSourceService {
     /// key map).
     static func installedKeyboards() -> [InstalledLayout] {
         guard let listRef = TISCreateInputSourceList(nil, false) else { return [] }
-        let sources = listRef.takeRetainedValue() as! [TISInputSource]
+        guard let sources = listRef.takeRetainedValue() as? [TISInputSource] else { return [] }
 
         var out: [InstalledLayout] = []
         for src in sources {

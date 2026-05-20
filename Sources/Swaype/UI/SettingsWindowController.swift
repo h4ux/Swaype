@@ -2,18 +2,21 @@ import AppKit
 import SwiftUI
 
 /// Manually-managed Settings window. The SwiftUI `Settings` scene approach is
-/// unreliable from `.accessory` (menu-bar-only) apps — the `showSettingsWindow:`
-/// selector silently no-ops in many real-world configurations. A plain
-/// NSWindowController is far easier to keep working.
+/// unreliable from `.accessory` (menu-bar-only) apps — `showSettingsWindow:`
+/// silently no-ops in many configurations. A plain NSWindowController is
+/// simpler and avoids the activation-policy juggling that can crash on macOS
+/// builds where Swaype is not the foreground app at launch time.
 @MainActor
-final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+final class SettingsWindowController: NSWindowController {
 
-    static let shared: SettingsWindowController = make()
+    convenience init(state: AppState, updater: UpdateService) {
+        let rootView = SettingsView()
+            .environmentObject(state)
+            .environmentObject(updater)
+        let hosting = NSHostingController(rootView: rootView)
 
-    private static func make() -> SettingsWindowController {
-        let hosting = NSHostingController(rootView: SettingsView())
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 540),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -21,28 +24,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.contentViewController = hosting
         window.title = "Swaype Settings"
         window.isReleasedWhenClosed = false
+        // Allow the window to appear on every Space and over fullscreen apps —
+        // important for a menu-bar app the user might invoke from any context.
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.center()
 
-        let controller = SettingsWindowController(window: window)
-        window.delegate = controller
-        return controller
+        self.init(window: window)
     }
 
     func show() {
-        // Promote to regular policy so AppKit reliably brings our window front
-        // and accepts keyboard focus. We drop back to accessory in windowWillClose.
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-
         if window?.isVisible != true {
             window?.center()
         }
         window?.makeKeyAndOrderFront(nil)
-    }
-
-    nonisolated func windowWillClose(_ notification: Notification) {
-        Task { @MainActor in
-            NSApp.setActivationPolicy(.accessory)
-        }
+        window?.orderFrontRegardless()
     }
 }

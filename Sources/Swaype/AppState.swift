@@ -6,15 +6,13 @@ import SwiftUI
 /// it when the user picks different layouts in Settings.
 @MainActor
 final class AppState: ObservableObject {
-    static let shared = AppState()
-
     /// All keyboard layouts the user has installed.
     let installed: [InstalledLayout]
 
     @Published private(set) var converter: LayoutConverter
     @Published private(set) var pairName: String
 
-    private init() {
+    init() {
         let layouts = InputSourceService.installedKeyboards()
         self.installed = layouts
         AppState.seedDefaultsIfNeeded(from: layouts)

@@ -3,9 +3,11 @@ import AppKit
 @MainActor
 final class MenuBuilder {
     private weak var target: AppDelegate?
+    private unowned let state: AppState
 
-    init(target: AppDelegate) {
+    init(target: AppDelegate, state: AppState) {
         self.target = target
+        self.state = state
     }
 
     func build() -> NSMenu {
@@ -28,7 +30,7 @@ final class MenuBuilder {
         menu.addItem(.separator())
 
         let pairItem = NSMenuItem(
-            title: "Pair: \(AppState.shared.pairName)",
+            title: "Pair: \(state.pairName)",
             action: nil,
             keyEquivalent: ""
         )
@@ -44,6 +46,12 @@ final class MenuBuilder {
         )
         launchAtLoginItem.state = Preferences.launchAtLogin ? .on : .off
         menu.addItem(launchAtLoginItem)
+
+        menu.addItem(item(
+            title: "Check for Updates…",
+            action: #selector(AppDelegate.checkForUpdatesFromMenu(_:)),
+            keyEquivalent: ""
+        ))
 
         menu.addItem(item(
             title: "Settings…",
