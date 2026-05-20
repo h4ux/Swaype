@@ -7,6 +7,7 @@ enum Preferences {
         static let launchAtLogin = "launchAtLogin"
         static let primaryLayoutId = "primaryLayoutId"
         static let secondaryLayoutId = "secondaryLayoutId"
+        static let updateRepository = "updateRepository"
     }
 
     static var launchAtLogin: Bool {
@@ -22,5 +23,12 @@ enum Preferences {
     static var secondaryLayoutId: String {
         get { UserDefaults.standard.string(forKey: Key.secondaryLayoutId) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: Key.secondaryLayoutId) }
+    }
+
+    /// User override for "owner/repo". When empty, UpdateService falls back
+    /// to the Info.plist value (which CI fills in with `github.repository`).
+    static var updateRepository: String {
+        get { UserDefaults.standard.string(forKey: Key.updateRepository) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: Key.updateRepository) }
     }
 }

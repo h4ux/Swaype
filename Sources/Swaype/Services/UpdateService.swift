@@ -37,13 +37,28 @@ final class UpdateService: ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
-    /// `owner/repo` resolved from the Info.plist or the fallback constant.
+    /// `owner/repo` resolved in priority order:
+    /// 1. User override in Settings (Preferences.updateRepository)
+    /// 2. Info.plist `SwaypeUpdateRepository` (CI fills this in)
+    /// 3. The fallback constant
     var repository: String {
-        let configured = Bundle.main.infoDictionary?["SwaypeUpdateRepository"] as? String
-        if let configured, !configured.isEmpty, configured.contains("/") {
-            return configured
+        let candidates = [
+            Preferences.updateRepository,
+            Bundle.main.infoDictionary?["SwaypeUpdateRepository"] as? String ?? ""
+        ]
+        for value in candidates {
+            let trimmed = value.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty, trimmed.contains("/") {
+                return trimmed
+            }
         }
         return Self.fallbackRepository
+    }
+
+    /// Best-effort link to the releases page in a browser — useful as a
+    /// fallback when the API is rate-limited.
+    var releasesURL: URL? {
+        URL(string: "https://github.com/\(repository)/releases")
     }
 
     // MARK: - Check
@@ -57,18 +72,11 @@ final class UpdateService: ObservableObject {
             req.setValue("Swaype/\(currentVersion)", forHTTPHeaderField: "User-Agent")
 
             let (data, response) = try await URLSession.shared.data(for: req)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let http = response as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
+
             guard code == 200 else {
-                let detail: String
-                switch code {
-                case 404:
-                    detail = "No releases found at github.com/\(repository). Configure SwaypeUpdateRepository in Info.plist."
-                case 403:
-                    detail = "GitHub rate-limited the check. Try again in a few minutes."
-                default:
-                    detail = "GitHub returned HTTP \(code)."
-                }
-                status = .failed(detail)
+                status = .failed(describeFailure(code: code, response: http, body: data))
                 return
             }
 
@@ -165,6 +173,44 @@ final class UpdateService: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// Builds a human-friendly message for a non-200 GitHub response, using
+    /// rate-limit headers and the response body's `message` field where
+    /// available.
+    private func describeFailure(code: Int, response: HTTPURLResponse?, body: Data) -> String {
+        let githubMessage = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["message"] as? String
+
+        switch code {
+        case 404:
+            return "No releases at github.com/\(repository). Check the 'Update repository' field in Settings."
+
+        case 403:
+            // GitHub uses 403 both for rate-limit and forbidden — disambiguate
+            // via the x-ratelimit-remaining header.
+            let remaining = response?.value(forHTTPHeaderField: "x-ratelimit-remaining")
+            if remaining == "0" {
+                let resetEpoch = response?.value(forHTTPHeaderField: "x-ratelimit-reset").flatMap(TimeInterval.init)
+                if let resetEpoch {
+                    let resetDate = Date(timeIntervalSince1970: resetEpoch)
+                    let fmt = DateFormatter()
+                    fmt.timeStyle = .short
+                    fmt.dateStyle = .none
+                    return "GitHub rate limit reached (resets at \(fmt.string(from: resetDate)))."
+                }
+                return "GitHub rate limit reached. Try again in an hour."
+            }
+            if let githubMessage {
+                return "GitHub 403: \(githubMessage)"
+            }
+            return "GitHub 403 (forbidden) for \(repository). Repo may be private."
+
+        default:
+            if let githubMessage {
+                return "GitHub \(code): \(githubMessage)"
+            }
+            return "GitHub returned HTTP \(code)."
+        }
+    }
 
     private func writeInstallerScript(stagingApp: URL, installPath: URL, pid: Int32) throws -> URL {
         let script = """

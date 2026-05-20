@@ -1,3 +1,4 @@
+import AppKit
 import KeyboardShortcuts
 import SwiftUI
 
@@ -8,6 +9,7 @@ struct SettingsView: View {
     @AppStorage(Preferences.Key.launchAtLogin) private var launchAtLogin = false
     @AppStorage(Preferences.Key.primaryLayoutId) private var primaryLayoutId = ""
     @AppStorage(Preferences.Key.secondaryLayoutId) private var secondaryLayoutId = ""
+    @AppStorage(Preferences.Key.updateRepository) private var updateRepository = ""
 
     var body: some View {
         Form {
@@ -92,8 +94,32 @@ struct SettingsView: View {
                 Spacer()
                 actionButton
             }
+
+            HStack {
+                TextField(
+                    "owner/repo",
+                    text: $updateRepository,
+                    prompt: Text(updater.repository)
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+
+                if let url = updater.releasesURL {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open releases page in browser")
+                }
+            }
         } header: {
             Text("Updates")
+        } footer: {
+            Text("CI builds auto-fill the repository from `${{ github.repository }}`. Override above if you forked the repo or want to track a different release stream.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

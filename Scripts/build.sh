@@ -35,6 +35,53 @@ fi
 echo "==> Building release binary (${ARCH_FLAGS[*]})"
 xcrun swift build -c release "${ARCH_FLAGS[@]}"
 
+# SPM generates Bundle.module accessors that look at
+# `Bundle.main.bundleURL + "<name>.bundle"` (the .app ROOT, not Resources)
+# and a hardcoded build-time absolute path in .build/. Neither resolves on
+# an end user's Mac, so the first call into a library that uses Bundle.module
+# (e.g. KeyboardShortcuts.Recorder) crashes with `fatalError`.
+#
+# Patch the generated accessors to probe Contents/Resources/ instead, then
+# rebuild so the patched logic ends up in the binary.
+ACCESSORS=$(find "$ROOT/.build" -path "*.build/DerivedSources/resource_bundle_accessor.swift" 2>/dev/null)
+if [[ -n "$ACCESSORS" ]]; then
+    PATCHED_ANY=false
+    while IFS= read -r accessor; do
+        # Derive the bundle name from the parent directory: e.g.
+        # ".build/.../KeyboardShortcuts.build/DerivedSources" → "KeyboardShortcuts"
+        target_dir="$(dirname "$(dirname "$accessor")")"
+        target_name="$(basename "$target_dir" .build)"
+        bundle_name="${target_name}_${target_name}"
+        cat > "$accessor" <<SWIFT
+import Foundation
+
+extension Foundation.Bundle {
+    static nonisolated let module: Bundle = {
+        let bundleName = "${bundle_name}"
+        let candidates = [
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/\\(bundleName).bundle"),
+            Bundle.main.resourceURL?.appendingPathComponent("\\(bundleName).bundle"),
+            Bundle.main.bundleURL.appendingPathComponent("\\(bundleName).bundle"),
+        ].compactMap { \$0 }
+        for url in candidates {
+            if let bundle = Bundle(url: url) { return bundle }
+        }
+        Swift.fatalError("could not load \\(bundleName) resource bundle")
+    }()
+}
+SWIFT
+        echo "    patched ${target_name} accessor → looks in Contents/Resources/"
+        PATCHED_ANY=true
+    done <<< "$ACCESSORS"
+
+    if [[ "$PATCHED_ANY" == "true" ]]; then
+        # Drop the cached .o for each patched accessor so SPM rebuilds it.
+        find "$ROOT/.build" -name "resource_bundle_accessor.swift.o" -delete 2>/dev/null || true
+        echo "==> Rebuilding with patched accessors"
+        xcrun swift build -c release "${ARCH_FLAGS[@]}"
+    fi
+fi
+
 # Resolve the binary path (single-arch builds land in .build/<triple>/release;
 # multi-arch builds land in .build/apple/Products/Release).
 BIN=""
@@ -69,7 +116,9 @@ cp "$BUILD/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp "$BUILD/menubar/"MenuBarIcon*.png "$APP/Contents/Resources/"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
-# Copy KeyboardShortcuts resource bundle if SPM produced one.
+# Copy SPM resource bundles into Contents/Resources/ — the patched
+# Bundle.module accessors above look there first, and code signing requires
+# bundle resources to live under Contents/ (not the .app root).
 SHORTCUTS_BUNDLE="$(dirname "$BIN")/KeyboardShortcuts_KeyboardShortcuts.bundle"
 if [[ -d "$SHORTCUTS_BUNDLE" ]]; then
     cp -R "$SHORTCUTS_BUNDLE" "$APP/Contents/Resources/"
@@ -79,7 +128,7 @@ echo "==> Ad-hoc signing"
 # Sign nested resource bundles first, then individual binaries, then the
 # top-level bundle. `codesign --deep` is deprecated for signing operations
 # and can produce signatures that Gatekeeper rejects on newer macOS.
-find "$APP/Contents/Resources" -type d -name "*.bundle" 2>/dev/null | while read -r nested; do
+find "$APP/Contents/Resources" "$APP" -maxdepth 2 -type d -name "*.bundle" 2>/dev/null | while read -r nested; do
     codesign --force --sign - "$nested"
 done
 find "$APP/Contents" -type f \( -name "*.dylib" -o -name "*.so" \) 2>/dev/null | while read -r lib; do
