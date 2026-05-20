@@ -1,0 +1,9 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+build/
+*.xcodeproj
+*.xcworkspace
+!*.xcodeproj/project.pbxproj
+# Package.resolved IS committed for an app — pins dependency versions for CI.

@@ -1,0 +1,107 @@
+name: Build & Release DMG
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for version calculation
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Calculate version
+        id: version
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Tag push: use the tag verbatim
+            NEW_VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Tagged release: $NEW_VERSION"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            # Main push: auto-bump patch
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+            echo "Auto patch bump: $NEW_VERSION"
+          else
+            # PR or other: keep current
+            NEW_VERSION="$VERSION"
+            echo "Non-release build: $NEW_VERSION"
+          fi
+
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update version in Info.plist
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
+          echo "Set version to $VERSION (build ${{ github.run_number }})"
+
+      - name: Run unit tests
+        run: swift test
+
+      - name: Build app and DMG
+        run: ./Scripts/build.sh
+
+      - name: Verify artifacts
+        run: |
+          ls -lh build/Swaype.app build/Swaype.dmg
+          test -d build/Swaype.app
+          test -f build/Swaype.dmg
+
+      - name: Rename DMG with version
+        run: |
+          mv build/Swaype.dmg "build/Swaype-${{ steps.version.outputs.version }}.dmg"
+          # Keep a copy at the unversioned filename so the "latest" release
+          # asset URL stays stable for users who hot-link it.
+          cp "build/Swaype-${{ steps.version.outputs.version }}.dmg" build/Swaype.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Swaype-${{ steps.version.outputs.version }}
+          path: build/Swaype-${{ steps.version.outputs.version }}.dmg
+          retention-days: 30
+
+      - name: Auto-tag main pushes
+        if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Swaype ${{ steps.version.outputs.version }}
+          files: |
+            build/Swaype-${{ steps.version.outputs.version }}.dmg
+            build/Swaype.dmg
+          generate_release_notes: true
