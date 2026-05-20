@@ -76,13 +76,19 @@ the bundled fallback example; Russian, Arabic, Greek, etc. all work too.
 3. Launch Swaype from `/Applications`. The colourful arrow icon appears in
    your menu bar.
 
-> **First-launch Gatekeeper warning:** the DMG is ad-hoc signed (no paid Apple
-> Developer ID — see [SECURITY.md](SECURITY.md#distribution-and-code-signing)).
-> Right-click the app in Applications → **Open** → confirm. macOS only asks
-> once. Alternatively:
+> **First-launch Gatekeeper warning** — the DMG is ad-hoc signed (no paid Apple
+> Developer ID; see [SECURITY.md](SECURITY.md#distribution-and-code-signing)).
+> macOS may refuse to launch the app, or it may silently quit. Run this once:
 > ```bash
 > xattr -dr com.apple.quarantine /Applications/Swaype.app
+> open /Applications/Swaype.app
 > ```
+> If it *still* doesn't open, run from Terminal to see what's going wrong:
+> ```bash
+> /Applications/Swaype.app/Contents/MacOS/Swaype
+> ```
+> The app logs its version, bundle path, and detected keyboards at launch.
+> Crashes also surface in Console.app under "Swaype".
 
 ### Build from source
 

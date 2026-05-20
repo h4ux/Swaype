@@ -38,5 +38,7 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Swaype</string>
+    <key>SwaypeUpdateRepository</key>
+    <string>h4ux/Swaype</string>
 </dict>
 </plist>

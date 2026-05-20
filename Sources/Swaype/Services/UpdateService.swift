@@ -8,9 +8,12 @@ import SwiftUI
 /// dependency — we own the entire pipeline.
 @MainActor
 final class UpdateService: ObservableObject {
-    /// GitHub owner/repo the updater queries. Change before publishing.
-    static let owner = "h4ux"
-    static let repo = "Swaype"
+    /// "owner/repo" of the GitHub repository the updater checks. Read from
+    /// `Info.plist` (`SwaypeUpdateRepository`), which the CI workflow fills in
+    /// with `${{ github.repository }}` so every build checks its own home repo.
+    /// Falls back to the placeholder below when running unbundled or before
+    /// CI has populated the value.
+    static let fallbackRepository = "h4ux/Swaype"
 
     enum Status: Equatable {
         case idle
@@ -34,19 +37,38 @@ final class UpdateService: ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
+    /// `owner/repo` resolved from the Info.plist or the fallback constant.
+    var repository: String {
+        let configured = Bundle.main.infoDictionary?["SwaypeUpdateRepository"] as? String
+        if let configured, !configured.isEmpty, configured.contains("/") {
+            return configured
+        }
+        return Self.fallbackRepository
+    }
+
     // MARK: - Check
 
     func checkForUpdate() async {
         status = .checking
         do {
-            let url = URL(string: "https://api.github.com/repos/\(Self.owner)/\(Self.repo)/releases/latest")!
+            let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
             var req = URLRequest(url: url)
             req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             req.setValue("Swaype/\(currentVersion)", forHTTPHeaderField: "User-Agent")
 
             let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                status = .failed("GitHub returned \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard code == 200 else {
+                let detail: String
+                switch code {
+                case 404:
+                    detail = "No releases found at github.com/\(repository). Configure SwaypeUpdateRepository in Info.plist."
+                case 403:
+                    detail = "GitHub rate-limited the check. Try again in a few minutes."
+                default:
+                    detail = "GitHub returned HTTP \(code)."
+                }
+                status = .failed(detail)
                 return
             }
 

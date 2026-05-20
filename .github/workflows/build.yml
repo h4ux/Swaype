@@ -21,8 +21,11 @@ jobs:
         with:
           fetch-depth: 0  # full history for version calculation
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Show toolchain
+        run: |
+          xcode-select -p
+          xcrun swift --version
+          sw_vers
 
       - name: Calculate version
         id: version
@@ -49,12 +52,14 @@ jobs:
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Update version in Info.plist
+      - name: Update version + update repository in Info.plist
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
-          echo "Set version to $VERSION (build ${{ github.run_number }})"
+          /usr/libexec/PlistBuddy -c "Set :SwaypeUpdateRepository $REPO" Resources/Info.plist
+          echo "Version $VERSION (build ${{ github.run_number }}) — updates from $REPO"
 
       - name: Run unit tests
         run: swift test
@@ -67,6 +72,15 @@ jobs:
           ls -lh build/Swaype.app build/Swaype.dmg
           test -d build/Swaype.app
           test -f build/Swaype.dmg
+          echo "---- bundle structure ----"
+          find build/Swaype.app -maxdepth 3 -type d
+          echo "---- Info.plist ----"
+          /usr/libexec/PlistBuddy -c "Print" build/Swaype.app/Contents/Info.plist
+          echo "---- codesign verification ----"
+          codesign --verify --strict --verbose=2 build/Swaype.app
+          codesign --display --verbose=2 build/Swaype.app
+          echo "---- spctl assess (informational; expected to fail for ad-hoc) ----"
+          spctl --assess --type execute --verbose=4 build/Swaype.app || true
 
       - name: Rename DMG with version
         run: |

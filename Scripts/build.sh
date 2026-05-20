@@ -76,7 +76,20 @@ if [[ -d "$SHORTCUTS_BUNDLE" ]]; then
 fi
 
 echo "==> Ad-hoc signing"
-codesign --force --deep --sign - "$APP"
+# Sign nested resource bundles first, then individual binaries, then the
+# top-level bundle. `codesign --deep` is deprecated for signing operations
+# and can produce signatures that Gatekeeper rejects on newer macOS.
+find "$APP/Contents/Resources" -type d -name "*.bundle" 2>/dev/null | while read -r nested; do
+    codesign --force --sign - "$nested"
+done
+find "$APP/Contents" -type f \( -name "*.dylib" -o -name "*.so" \) 2>/dev/null | while read -r lib; do
+    codesign --force --sign - "$lib"
+done
+codesign --force --sign - "$APP/Contents/MacOS/Swaype"
+codesign --force --sign - "$APP"
+
+# Verify the signature is valid — fails the build early if signing went wrong.
+codesign --verify --verbose "$APP" 2>&1 | head -3
 
 echo "==> Generating DMG background"
 xcrun swift "$ROOT/Scripts/MakeDMGBackground.swift" "$BUILD/dmg-background.png"

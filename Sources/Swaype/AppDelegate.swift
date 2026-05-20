@@ -21,6 +21,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Install the exception handler FIRST so any crash during the rest of
+        // launch surfaces in Console.app.
+        NSSetUncaughtExceptionHandler { exception in
+            NSLog("Swaype uncaught exception: \(exception.name.rawValue) — \(exception.reason ?? "no reason") — \(exception.userInfo ?? [:])")
+        }
+
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        let repo = Bundle.main.infoDictionary?["SwaypeUpdateRepository"] as? String ?? "?"
+        NSLog("Swaype launching — version \(version) (build \(build)), updates from \(repo)")
+        NSLog("Swaype bundle: \(Bundle.main.bundleURL.path)")
+        NSLog("Swaype installed keyboards: \(state.installed.count) (active pair: \(state.pairName))")
+
         NSApp.setActivationPolicy(.accessory)
 
         menuBuilder = MenuBuilder(target: self, state: state)
@@ -28,12 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupHotkey()
         observePairChanges()
         syncLaunchAtLoginPreference()
-
-        // Log uncaught Cocoa exceptions so users can paste them into a bug
-        // report instead of the app silently disappearing.
-        NSSetUncaughtExceptionHandler { exception in
-            NSLog("Swaype uncaught exception: \(exception.name.rawValue) — \(exception.reason ?? "no reason") — \(exception.userInfo ?? [:])")
-        }
     }
 
     // MARK: - Status item
